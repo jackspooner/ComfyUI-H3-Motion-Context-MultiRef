@@ -143,3 +143,28 @@ Masked nodes lazily check PR #15988-equivalent velocity conversion. The fallback
 | Compatibility probe refuses to patch | Update ComfyUI or use a verified revision; unknown runtime layouts are not patched blindly. |
 
 For internals see [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md). Update history and original contributions are in [MODIFICATIONS.md](MODIFICATIONS.md).
+# Hard keyframe precedence and receipts
+
+`MiniMaxH3CustomKeyframesMasked` keeps output 0 as LATENT and appends output 1,
+`receipt_json`. Its version-1 JSON contains `conflictPolicy`, target `frames` and
+ordered `keyframes` with `slot`, `requestedFrame`, `resolvedFrame`, `frameSpan`
+and `latentStep`. All frame positions in the receipt are zero-based regardless
+of input indexing. Interior frames claim their complete 4-frame token; positions
+0,17,34,51,... claim one-frame tokens. Two supplied keys claiming the same token
+still fail before encoding.
+
+The optional `conflict_policy` defaults to `error`: any incoming video mask below
+exactly 1 conflicts, including near-one values. `keyframe_wins` explicitly writes
+the supplied still's latent into that complete token and sets its video mask to
+zero, retaining all other token values/masks and the audio stream/mask. This
+provides deliberate precedence over fractional motion-source preservation;
+it does not promise pixel-exact decoded images.
+
+For a real interior source insert, use `MiniMaxH3ExistingVideoMaskedContext` and
+`MiniMaxH3AssembleInterior` together. The former selects the source tail, snaps
+context length to 39+51*k and insertion down to a multiple of17, and returns the
+actual insertion and preserved-frame count. Multiples of51 align the40Hz audio
+clock exactly; other17-frame positions round audio placement. The assembly owner
+copies the actual source frames/PCM back into the decoded timeline. A retained
+latent alone is not the final assembled result. A router selecting a source
+range must pass that same range to both preparation and assembly.

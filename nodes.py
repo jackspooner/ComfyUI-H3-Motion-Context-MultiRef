@@ -858,17 +858,17 @@ class _DynamicKeyframeInputs(dict):
         return None
 
     def __contains__(self, key):
-        return self._spec(key) is not None
+        return self._spec(key) is not None or super().__contains__(key)
 
     def __getitem__(self, key):
         spec = self._spec(key)
         if spec is not None:
             return spec
-        raise KeyError(key)
+        return super().__getitem__(key)
 
     def get(self, key, default=None):
         spec = self._spec(key)
-        return default if spec is None else spec
+        return super().get(key, default) if spec is None else spec
 
 class MiniMaxH3CustomKeyframes:
     """Attach still-image H3 keyframes at arbitrary timeline positions."""
@@ -1415,11 +1415,16 @@ class MiniMaxH3CustomKeyframesMasked:
                     {"default": "disabled"},
                 ),
             },
-            "optional": _DynamicKeyframeInputs(),
+            "optional": _DynamicKeyframeInputs({
+                "conflict_policy": (["error", "keyframe_wins"], {
+                    "default": "error",
+                    "tooltip": "error refuses overlapping source preservation; keyframe_wins replaces the complete video token with the hard keyframe. Audio is unchanged.",
+                }),
+            }),
         }
 
-    RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("latent",)
+    RETURN_TYPES = ("LATENT", "STRING")
+    RETURN_NAMES = ("latent", "receipt_json")
     FUNCTION = "apply"
     CATEGORY = "conditioning/minimax"
     DESCRIPTION = (
@@ -1429,7 +1434,7 @@ class MiniMaxH3CustomKeyframesMasked:
         "... in the default 1-based mode; 0, 17, 34, 51, ... in 0-based mode. "
         "Interior positions pin the full containing latent step (up to 4 "
         "frames of latent protection; decoded pixels may differ). Existing nested H3 AV masks are preserved and "
-        "merged; a keyframe may not overlap an already protected video step. "
+        "merged; conflict_policy chooses error or hard-keyframe precedence for overlapping video steps. "
         "Audio mask state is preserved unchanged."
     )
 
@@ -1440,9 +1445,12 @@ class MiniMaxH3CustomKeyframesMasked:
         keyframe_state,
         indexing="1-based",
         crop="disabled",
+        conflict_policy="error",
         **kwargs,
     ):
         _require_h3_mask_support()
+        if conflict_policy not in ("error", "keyframe_wins"):
+            raise ValueError("h3_motion_context: unknown hard-keyframe conflict_policy")
 
         try:
             state = json.loads(keyframe_state or "{}")
@@ -1656,10 +1664,10 @@ class MiniMaxH3CustomKeyframesMasked:
             audio_mask = None
 
         # Hard keyframes overwrite the latent value for their complete H3 video step.
-        # Refuse to overwrite any step that is already protected by an upstream mask;
-        # that would make two different preservation sources claim the same token.
+        # Preserve the default refusal; explicit keyframe precedence replaces the
+        # complete video token, including fractional source preservation.
         for step_k, slot, image, pixel_index, step_start, step_span in anchors:
-            if bool((video_mask[:, :, step_k] < 1.0 - 1e-6).any()):
+            if conflict_policy == "error" and bool((video_mask[:, :, step_k] < 1.0).any()):
                 display_position = pixel_index + 1 if indexing == "1-based" else pixel_index
                 raise ValueError(
                     "h3_motion_context: keyframe %d (position %d) maps to latent "
@@ -1712,7 +1720,11 @@ class MiniMaxH3CustomKeyframesMasked:
             width,
             height,
         )
-        return (out,)
+        receipt = {"version": 1, "conflictPolicy": conflict_policy, "frames": frame_count,
+                   "keyframes": [{"slot": slot, "requestedFrame": pixel_index,
+                                  "resolvedFrame": start, "frameSpan": span, "latentStep": step}
+                                 for step, slot, _image, pixel_index, start, span in anchors]}
+        return (out, json.dumps(receipt, separators=(",", ":")))
 
 
 from .h3_audio_vae_compat import MiniMaxH3AudioVAECompatibility
