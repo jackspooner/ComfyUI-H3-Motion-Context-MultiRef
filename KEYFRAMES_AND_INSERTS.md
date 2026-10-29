@@ -154,7 +154,10 @@ of input indexing. Interior frames claim their complete 4-frame token; positions
 still fail before encoding.
 
 The optional `conflict_policy` defaults to `error`: any incoming video mask below
-exactly 1 conflicts, including near-one values. `keyframe_wins` explicitly writes
+exactly 1 conflicts, including near-one values. Explicit `preserve_existing`
+instead rejects a claimed token only when any incoming video-mask region is zero;
+positive fractional motion yields to the anchor. This matches Cutlery guide pins'
+policy of the same name. `keyframe_wins` explicitly writes
 the supplied still's latent into that complete token and sets its video mask to
 zero, retaining all other token values/masks and the audio stream/mask. This
 provides deliberate precedence over fractional motion-source preservation;

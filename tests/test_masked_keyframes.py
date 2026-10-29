@@ -380,9 +380,44 @@ def test_default_conflict_rejects_even_near_one_fractional_preservation():
 def test_conflict_policy_is_advertised_with_dynamic_keyframe_inputs():
     optional = _load_nodes().MiniMaxH3CustomKeyframesMasked.INPUT_TYPES()["optional"]
     assert "conflict_policy" in optional
-    assert optional["conflict_policy"][0] == ["error", "keyframe_wins"]
+    assert optional["conflict_policy"][0] == ["error", "keyframe_wins", "preserve_existing"]
     assert "keyframe_image_7" in optional
     assert optional.get("keyframe_position_7")[0] == "INT"
+
+
+def test_preserve_existing_allows_fractional_motion_but_rejects_any_hard_zero():
+    nodes = _load_nodes()
+    NT = sys.modules["comfy.nested_tensor"].NestedTensor
+    for strength in (0.0, 0.5, 0.99999994, 1.0):
+        latent = _make_av_latent()
+        mask = torch.full((1, 1, 42, 2, 4), strength)
+        audio_mask = torch.full((1, 1, 2, 235), 0.125)
+        latent["noise_mask"] = NT((mask, audio_mask))
+        try:
+            result, receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+                latent, _StillVAE(), '{"count":1,"positions":[20]}', "0-based", "disabled",
+                conflict_policy="preserve_existing", keyframe_image_1=_make_image())
+        except ValueError as error:
+            assert strength == 0 and "already protected" in str(error)
+            continue
+        assert strength > 0
+        vm, am = result["noise_mask"].unbind()
+        assert vm[:, :, 6].max() == 0
+        torch.testing.assert_close(vm[:, :, :6], mask[:, :, :6])
+        torch.testing.assert_close(vm[:, :, 7:], mask[:, :, 7:])
+        torch.testing.assert_close(am, audio_mask)
+        torch.testing.assert_close(mask, torch.full_like(mask, strength))
+        assert json.loads(receipt)["conflictPolicy"] == "preserve_existing"
+    # A spatially partial hard zero still owns part of the token; do not clobber it.
+    mask.fill_(0.5)
+    mask[0, 0, 6, 0, 0] = 0
+    try:
+        nodes.MiniMaxH3CustomKeyframesMasked().apply(
+            latent, _StillVAE(), '{"count":1,"positions":[20]}', "0-based", "disabled",
+            conflict_policy="preserve_existing", keyframe_image_1=_make_image())
+        raise AssertionError("a partial hard-zero region must reject the whole keyframe token")
+    except ValueError as error:
+        assert "already protected" in str(error)
 
 
 def test_plain_single_tensor_noise_mask_rejected_with_h3_guidance():

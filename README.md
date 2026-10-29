@@ -4,10 +4,12 @@ MiniMax H3 nodes and workflows for video extension, music videos, motion transfe
 
 This fork retains [seitanism's upstream project](https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef)
 and [README](https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef/blob/main/README.md).
-Hard masked keyframes now offer explicit `conflict_policy: keyframe_wins` to
+Hard masked keyframes offer explicit `conflict_policy: preserve_existing` to
+allow fractional source motion while rejecting any hard-zero region in a claimed
+token. The legacy default `error` still rejects every incoming mask below one.
+Explicit `conflict_policy: keyframe_wins` can
 replace source-preserved video tokens while retaining audio masks and unrelated
-tokens. The default `error` policy still refuses overlap, including near-one
-fractional masks. An appended `receipt_json` output records zero-based requested
+tokens. An appended `receipt_json` output records zero-based requested
 frame, resolved token start/span and latent step; the existing LATENT output stays
 at index 0. See [keyframes and inserts](KEYFRAMES_AND_INSERTS.md).
 

@@ -1363,8 +1363,8 @@ class MiniMaxH3CustomKeyframesMasked:
     Hard-preserves one latent step per keyframe (up to 4 frames of static hold for
     interior frames; exactly 1 frame at phase-0 positions). Phase-0 positions are
     1, 18, 35, 52, ... in the default 1-based mode; 0, 17, 34, 51, ... in 0-based
-    mode. Use the soft keyframe node for suggestions; use this node when the frame
-    must appear verbatim. Audio is not masked and will be fully generated.
+    mode. Use the soft keyframe node for suggestions; use this node for a hard
+    latent anchor. Decoded pixels can differ. Existing audio masks are preserved.
 
     If the decoded output shows still-frame artifacts, encode a 5-frame static run
     (native, 2 steps) and take step 1 (the 4-frame token) as the contingency path.
@@ -1416,9 +1416,9 @@ class MiniMaxH3CustomKeyframesMasked:
                 ),
             },
             "optional": _DynamicKeyframeInputs({
-                "conflict_policy": (["error", "keyframe_wins"], {
+                "conflict_policy": (["error", "keyframe_wins", "preserve_existing"], {
                     "default": "error",
-                    "tooltip": "error refuses overlapping source preservation; keyframe_wins replaces the complete video token with the hard keyframe. Audio is unchanged.",
+                    "tooltip": "error retains legacy refusal of any mask below 1; preserve_existing rejects hard-zero masks but allows fractional motion; keyframe_wins replaces the complete video token. Audio is unchanged.",
                 }),
             }),
         }
@@ -1434,7 +1434,7 @@ class MiniMaxH3CustomKeyframesMasked:
         "... in the default 1-based mode; 0, 17, 34, 51, ... in 0-based mode. "
         "Interior positions pin the full containing latent step (up to 4 "
         "frames of latent protection; decoded pixels may differ). Existing nested H3 AV masks are preserved and "
-        "merged; conflict_policy chooses error or hard-keyframe precedence for overlapping video steps. "
+        "merged; conflict_policy chooses legacy error (any mask below 1), preserve_existing (hard zeros), or keyframe_wins (replace the token). "
         "Audio mask state is preserved unchanged."
     )
 
@@ -1449,7 +1449,7 @@ class MiniMaxH3CustomKeyframesMasked:
         **kwargs,
     ):
         _require_h3_mask_support()
-        if conflict_policy not in ("error", "keyframe_wins"):
+        if conflict_policy not in ("error", "keyframe_wins", "preserve_existing"):
             raise ValueError("h3_motion_context: unknown hard-keyframe conflict_policy")
 
         try:
@@ -1667,7 +1667,8 @@ class MiniMaxH3CustomKeyframesMasked:
         # Preserve the default refusal; explicit keyframe precedence replaces the
         # complete video token, including fractional source preservation.
         for step_k, slot, image, pixel_index, step_start, step_span in anchors:
-            if conflict_policy == "error" and bool((video_mask[:, :, step_k] < 1.0).any()):
+            conflicts = (video_mask[:, :, step_k] < 1.0) if conflict_policy == "error" else (video_mask[:, :, step_k] <= 0)
+            if conflict_policy != "keyframe_wins" and bool(conflicts.any()):
                 display_position = pixel_index + 1 if indexing == "1-based" else pixel_index
                 raise ValueError(
                     "h3_motion_context: keyframe %d (position %d) maps to latent "
