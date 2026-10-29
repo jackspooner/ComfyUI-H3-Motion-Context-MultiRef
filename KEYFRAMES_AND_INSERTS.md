@@ -143,7 +143,7 @@ Masked nodes lazily check PR #15988-equivalent velocity conversion. The fallback
 | Compatibility probe refuses to patch | Update ComfyUI or use a verified revision; unknown runtime layouts are not patched blindly. |
 
 For internals see [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md). Update history and original contributions are in [MODIFICATIONS.md](MODIFICATIONS.md).
-# Hard keyframe precedence and receipts
+## Hard keyframe precedence and receipts
 
 `MiniMaxH3CustomKeyframesMasked` keeps output 0 as LATENT and appends output 1,
 `receipt_json`. Its version-1 JSON contains `conflictPolicy`, target `frames` and
@@ -162,9 +162,9 @@ it does not promise pixel-exact decoded images.
 
 For a real interior source insert, use `MiniMaxH3ExistingVideoMaskedContext` and
 `MiniMaxH3AssembleInterior` together. The former selects the source tail, snaps
-context length to 39+51*k and insertion down to a multiple of17, and returns the
-actual insertion and preserved-frame count. Multiples of51 align the40Hz audio
-clock exactly; other17-frame positions round audio placement. The assembly owner
+context length to 39+51*k and insertion down to a multiple of 17, and returns the
+actual insertion and preserved-frame count. Multiples of 51 align the 40 Hz audio
+clock exactly; other 17-frame positions round audio placement. The assembly owner
 copies the actual source frames/PCM back into the decoded timeline. A retained
 latent alone is not the final assembled result. A router selecting a source
 range must pass that same range to both preparation and assembly.
