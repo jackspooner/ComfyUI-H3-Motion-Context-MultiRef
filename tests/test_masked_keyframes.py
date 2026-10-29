@@ -1,6 +1,7 @@
 """CPU-only tests for MiniMaxH3CustomKeyframesMasked in nodes.py."""
 
 import importlib.util
+import json
 import logging
 import sys
 import types
@@ -227,7 +228,7 @@ def test_mask_zeros_exactly_at_pinned_steps():
     latent = _make_av_latent()
     state = '{"count":2,"positions":[1,18]}'  # 1-based: frame 0 and frame 17
 
-    out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+    out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
         latent, _StillVAE(), state, "1-based", "disabled",
         keyframe_image_1=_make_image(0.1),
         keyframe_image_2=_make_image(0.2),
@@ -250,7 +251,7 @@ def test_audio_mask_all_ones():
     latent = _make_av_latent()
     state = '{"count":1,"positions":[1]}'
 
-    out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+    out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
         latent, _StillVAE(), state, "1-based", "disabled",
         keyframe_image_1=_make_image(),
     )
@@ -274,7 +275,7 @@ def test_existing_nested_av_mask_merges_without_clobbering_audio():
 
     # 1-based position 18 -> video latent step 5, outside protected step 0.
     state = '{"count":1,"positions":[18]}'
-    out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+    out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
         latent, _StillVAE(), state, "1-based", "disabled",
         keyframe_image_1=_make_image(),
     )
@@ -335,6 +336,53 @@ def test_fractionally_protected_step_also_counts_as_overlap():
         assert False, "Expected ValueError for fractional protected-step overlap"
     except ValueError as e:
         assert "already protected" in str(e).lower()
+
+
+def test_explicit_keyframe_precedence_preserves_other_tokens_and_audio():
+    nodes = _load_nodes()
+    NT = sys.modules["comfy.nested_tensor"].NestedTensor
+    for strength in (0.0, 0.5, 0.99999994, 1.0):
+        latent = _make_av_latent()
+        video_mask = torch.full((1, 1, 42, 2, 4), strength)
+        audio_mask = torch.full((1, 1, 2, 235), 0.125)
+        latent["noise_mask"] = NT((video_mask, audio_mask))
+        result, receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+            latent, _StillVAE(), '{"count":1,"positions":[20]}', "0-based", "disabled",
+            conflict_policy="keyframe_wins", keyframe_image_1=_make_image())
+        vm, am = result["noise_mask"].unbind()
+        video, audio = result["samples"].unbind()
+        assert vm[:, :, 6].max() == 0
+        torch.testing.assert_close(vm[:, :, :6], video_mask[:, :, :6])
+        torch.testing.assert_close(vm[:, :, 7:], video_mask[:, :, 7:])
+        torch.testing.assert_close(am, audio_mask)
+        torch.testing.assert_close(audio, latent["samples"].unbind()[1])
+        assert video[:, :, 6].mean().item() > 0.76
+        torch.testing.assert_close(video_mask, torch.full_like(video_mask, strength))
+        assert json.loads(receipt) == {"version": 1, "conflictPolicy": "keyframe_wins", "frames": 141,
+            "keyframes": [{"slot": 1, "requestedFrame": 20, "resolvedFrame": 18, "frameSpan": 4, "latentStep": 6}]}
+
+
+def test_default_conflict_rejects_even_near_one_fractional_preservation():
+    nodes = _load_nodes()
+    NT = sys.modules["comfy.nested_tensor"].NestedTensor
+    latent = _make_av_latent()
+    mask = torch.ones(1, 1, 42, 2, 4)
+    mask[:, :, 0] = 0.99999994
+    latent["noise_mask"] = NT((mask, torch.ones(1, 1, 2, 235)))
+    try:
+        nodes.MiniMaxH3CustomKeyframesMasked().apply(latent, _StillVAE(), '{"count":1,"positions":[0]}',
+            "0-based", "disabled", keyframe_image_1=_make_image())
+        raise AssertionError("fractional protection must not be rounded to unprotected")
+    except ValueError as error:
+        assert "already protected" in str(error)
+
+
+def test_conflict_policy_is_advertised_with_dynamic_keyframe_inputs():
+    optional = _load_nodes().MiniMaxH3CustomKeyframesMasked.INPUT_TYPES()["optional"]
+    assert "conflict_policy" in optional
+    assert optional["conflict_policy"][0] == ["error", "keyframe_wins"]
+    assert "keyframe_image_7" in optional
+    assert optional.get("keyframe_position_7")[0] == "INT"
 
 
 def test_plain_single_tensor_noise_mask_rejected_with_h3_guidance():
@@ -398,7 +446,7 @@ def test_0based_indexing():
     latent = _make_av_latent()
     state = '{"count":1,"positions":[0]}'  # 0-based: frame 0
 
-    out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+    out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
         latent, _StillVAE(), state, "0-based", "disabled",
         keyframe_image_1=_make_image(),
     )
@@ -421,7 +469,7 @@ def test_encoded_token_written_to_correct_step():
     # Frame 17 (1-based pos 18) -> step 5
     state = '{"count":1,"positions":[18]}'
 
-    out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+    out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
         latent, MarkingVAE(), state, "1-based", "disabled",
         keyframe_image_1=_make_image(),
     )
@@ -462,7 +510,7 @@ def test_1based_position_17_is_interior_static_hold():
     prev_level = log.level
     log.setLevel(logging.INFO)
     try:
-        out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+        out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
             latent, _StillVAE(), state, "1-based", "disabled",
             keyframe_image_1=_make_image(),
         )
@@ -495,7 +543,7 @@ def test_1based_position_18_is_phase0_no_static_hold():
     prev_level = log.level
     log.setLevel(logging.INFO)
     try:
-        out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+        out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
             latent, _StillVAE(), state, "1-based", "disabled",
             keyframe_image_1=_make_image(),
         )
@@ -517,7 +565,7 @@ def test_connected_position_int_overrides_saved_widget_state():
     latent = _make_av_latent()
     state = '{"count":1,"positions":[1]}'
 
-    out_latent, = nodes.MiniMaxH3CustomKeyframesMasked().apply(
+    out_latent, _receipt = nodes.MiniMaxH3CustomKeyframesMasked().apply(
         latent, _StillVAE(), state, "1-based", "disabled",
         keyframe_image_1=_make_image(),
         keyframe_position_1=18,

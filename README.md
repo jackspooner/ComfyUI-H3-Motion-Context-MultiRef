@@ -2,6 +2,24 @@
 
 MiniMax H3 nodes and workflows for video extension, music videos, motion transfer, and custom keyframes.
 
+This fork retains [seitanism's upstream project](https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef)
+and [README](https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef/blob/main/README.md).
+Hard masked keyframes now offer explicit `conflict_policy: keyframe_wins` to
+replace source-preserved video tokens while retaining audio masks and unrelated
+tokens. The default `error` policy still refuses overlap, including near-one
+fractional masks. An appended `receipt_json` output records zero-based requested
+frame, resolved token start/span and latent step; the existing LATENT output stays
+at index 0. See [keyframes and inserts](KEYFRAMES_AND_INSERTS.md).
+
+## Development
+
+Use an existing Python 3.10+ runtime with Torch and NumPy, then run
+`python scripts/setup_worktree.py`. It performs prerequisite checks only and is
+safe to rerun; there are no generated outputs, installs or service changes.
+Run `python tests/run_tests.py` separately for CPU/static regression coverage.
+Mocks exercise native tensor/mask contracts without models or live workflow
+submission; generated quality and deployment require separate acceptance.
+
 **Update 9 — 2026-09-05:** fixes streamed-output memory retention and spatial masks, tightens AV Bridge timing, adds dated output folders, and checks H3 audio/mask compatibility lazily. See [MODIFICATIONS.md](MODIFICATIONS.md) for the complete dated update history and technical release details.
 
 ## Choose a workflow
